@@ -52,7 +52,7 @@ const securityMiddleware = async (
         .json({ message: "Request blocked by security policy" });
     }
     if (decision.isDenied() && decision.reason.isRateLimit()) {
-      return res.status(403).json({ message });
+      return res.status(429).json({ message });
     }
     next();
   } catch (e) {
