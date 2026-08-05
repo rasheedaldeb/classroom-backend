@@ -10,7 +10,7 @@
     "ignoreDeprecations": "6.0",
 
     /* Project structure */
-    "rootDir": ".",
+    "rootDir": "src",
     "outDir": "dist",
 
     /* Type safety */
