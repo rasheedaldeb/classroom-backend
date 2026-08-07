@@ -7,10 +7,9 @@
     /* Node ESM */
     "module": "ES2022",
     "moduleResolution": "node",
-    "ignoreDeprecations": "6.0",
 
     /* Project structure */
-    "rootDir": ".",
+    "rootDir": "src",
     "outDir": "dist",
 
     /* Type safety */
@@ -31,5 +30,5 @@
     /* Environment types */
     "types": ["node"]
   },
-  "include": ["src", "drizzle.config.ts"]
+  "include": ["src"]
 }
