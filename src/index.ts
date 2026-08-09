@@ -13,9 +13,27 @@ const port = 8000;
 if (!process.env.FRONTEND_URL) {
   throw new Error("frontend url is not set in .env file");
 }
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  "https://classroom-frontend-six-iota.vercel.app",
+];
+
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL,
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like Postman or curl)
+      if (!origin) return callback(null, true);
+
+      // Check if origin matches allowed list or any Vercel preview domain
+      const isAllowed =
+        allowedOrigins.includes(origin) || origin.endsWith(".vercel.app");
+
+      if (isAllowed) {
+        callback(null, true);
+      } else {
+        callback(new Error("Blocked by CORS policy"));
+      }
+    },
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
   }),
