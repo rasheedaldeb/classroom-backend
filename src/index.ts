@@ -8,6 +8,9 @@ import { auth } from "./lib/auth.js";
 import { toNodeHandler } from "better-auth/node";
 import usersRouter from "./routes/users.js";
 import classesRouter from "./routes/classes.js";
+import departmentsRouter from "./routes/department.js";
+import enrollmentsRouter from "./routes/enrollments.js";
+import statsRouter from "./routes/stats.js";
 const app = express();
 const port = 8000;
 if (!process.env.FRONTEND_URL) {
@@ -45,6 +48,9 @@ app.use(securityMiddleware);
 app.use("/api/subjects", subjectsRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/classes", classesRouter);
+app.use("/api/departments", departmentsRouter);
+app.use("/api/enrollments", enrollmentsRouter);
+app.use("/api/stats", statsRouter);
 app.get("/", (req, res) => {
   res.send("Hello World");
 });
