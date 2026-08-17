@@ -1,4 +1,4 @@
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import { and, desc, eq, getTableColumns, ilike, or, sql } from "drizzle-orm";
 
 import { db } from "../db/index.js";
@@ -12,18 +12,20 @@ import {
 
 const departmentsRouter = express.Router();
 
-// Get all departments with optional search and pagination
-departmentsRouter.get("/", async (req, res) => {
+// -----------------------------------------------------------------------------
+// GET / - List all departments with optional search and pagination
+// -----------------------------------------------------------------------------
+departmentsRouter.get("/", async (req: Request, res: Response) => {
   try {
-    const { search, page = 1, limit = 10 } = req.query;
+    const { search, page = "1", limit = "10" } = req.query;
 
-    const currentPage = Math.max(1, +page);
-    const limitPerPage = Math.max(1, +limit);
+    const currentPage = Math.max(1, parseInt(String(page), 10) || 1);
+    const limitPerPage = Math.max(1, parseInt(String(limit), 10) || 10);
     const offset = (currentPage - 1) * limitPerPage;
 
     const filterConditions = [];
 
-    if (search) {
+    if (typeof search === "string" && search.trim()) {
       filterConditions.push(
         or(
           ilike(departments.name, `%${search}%`),
@@ -40,7 +42,7 @@ departmentsRouter.get("/", async (req, res) => {
       .from(departments)
       .where(whereClause);
 
-    const totalCount = countResult[0]?.count ?? 0;
+    const totalCount = Number(countResult[0]?.count ?? 0);
 
     const departmentsList = await db
       .select({
@@ -55,7 +57,7 @@ departmentsRouter.get("/", async (req, res) => {
       .limit(limitPerPage)
       .offset(offset);
 
-    res.status(200).json({
+    return res.status(200).json({
       data: departmentsList,
       pagination: {
         page: currentPage,
@@ -66,10 +68,13 @@ departmentsRouter.get("/", async (req, res) => {
     });
   } catch (error) {
     console.error("GET /departments error:", error);
-    res.status(500).json({ error: "Failed to fetch departments" });
+    return res.status(500).json({ error: "Failed to fetch departments" });
   }
 });
 
+// -----------------------------------------------------------------------------
+// POST / - Create a new department (Admin Only)
+// -----------------------------------------------------------------------------
 departmentsRouter.post("/", async (req, res) => {
   try {
     const { code, name, description } = req.body;
@@ -79,19 +84,88 @@ departmentsRouter.post("/", async (req, res) => {
       .values({ code, name, description })
       .returning({ id: departments.id });
 
-    if (!createdDepartment) throw Error;
+    if (!createdDepartment) {
+      throw new Error("Failed to create department");
+    }
 
-    res.status(201).json({ data: createdDepartment });
+    return res.status(201).json({ data: createdDepartment });
   } catch (error) {
     console.error("POST /departments error:", error);
-    res.status(500).json({ error: "Failed to create department" });
+    return res.status(500).json({ error: "Failed to create department" });
   }
 });
 
-// Get department details with counts
-departmentsRouter.get("/:id", async (req, res) => {
+// -----------------------------------------------------------------------------
+// PUT /:id - Update an existing department (Admin Only)
+// -----------------------------------------------------------------------------
+departmentsRouter.patch("/:id", async (req, res) => {
   try {
     const departmentId = Number(req.params.id);
+
+    if (!Number.isFinite(departmentId)) {
+      return res.status(400).json({ error: "Invalid department id" });
+    }
+
+    const { code, name, description } = req.body;
+
+    const [updatedDepartment] = await db
+      .update(departments)
+      .set({
+        ...(code !== undefined && { code }),
+        ...(name !== undefined && { name }),
+        ...(description !== undefined && { description }),
+        updatedAt: new Date(),
+      })
+      .where(eq(departments.id, departmentId))
+      .returning();
+
+    if (!updatedDepartment) {
+      return res.status(404).json({ error: "Department not found" });
+    }
+
+    return res.status(200).json({ data: updatedDepartment });
+  } catch (error) {
+    console.error("PUT /departments/:id error:", error);
+    return res.status(500).json({ error: "Failed to update department" });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// DELETE /:id - Delete a department (Admin Only)
+// -----------------------------------------------------------------------------
+departmentsRouter.delete("/:id", async (req, res) => {
+  try {
+    const departmentId = Number(req.params.id);
+
+    if (!Number.isFinite(departmentId)) {
+      return res.status(400).json({ error: "Invalid department id" });
+    }
+
+    const [deletedDepartment] = await db
+      .delete(departments)
+      .where(eq(departments.id, departmentId))
+      .returning({ id: departments.id });
+
+    if (!deletedDepartment) {
+      return res.status(404).json({ error: "Department not found" });
+    }
+
+    return res.status(200).json({
+      message: "Department deleted successfully",
+      id: deletedDepartment.id,
+    });
+  } catch (error) {
+    console.error("DELETE /departments/:id error:", error);
+    return res.status(500).json({ error: "Failed to delete department" });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// GET /:id - Get department details with aggregated counts
+// -----------------------------------------------------------------------------
+departmentsRouter.get("/:id", async (req, res) => {
+  try {
+    const departmentId = parseInt(req.params.id, 10);
 
     if (!Number.isFinite(departmentId)) {
       return res.status(400).json({ error: "Invalid department id" });
@@ -131,34 +205,38 @@ departmentsRouter.get("/:id", async (req, res) => {
           ),
       ]);
 
-    res.status(200).json({
+    return res.status(200).json({
       data: {
         department,
         totals: {
-          subjects: subjectsCount[0]?.count ?? 0,
-          classes: classesCount[0]?.count ?? 0,
-          enrolledStudents: enrolledStudentsCount[0]?.count ?? 0,
+          subjects: Number(subjectsCount[0]?.count ?? 0),
+          classes: Number(classesCount[0]?.count ?? 0),
+          enrolledStudents: Number(enrolledStudentsCount[0]?.count ?? 0),
         },
       },
     });
   } catch (error) {
     console.error("GET /departments/:id error:", error);
-    res.status(500).json({ error: "Failed to fetch department details" });
+    return res
+      .status(500)
+      .json({ error: "Failed to fetch department details" });
   }
 });
 
-// List subjects in a department with pagination
+// -----------------------------------------------------------------------------
+// GET /:id/subjects - List subjects in a department
+// -----------------------------------------------------------------------------
 departmentsRouter.get("/:id/subjects", async (req, res) => {
   try {
-    const departmentId = Number(req.params.id);
-    const { page = 1, limit = 10 } = req.query;
+    const departmentId = parseInt(req.params.id, 10);
+    const { page = "1", limit = "10" } = req.query;
 
     if (!Number.isFinite(departmentId)) {
       return res.status(400).json({ error: "Invalid department id" });
     }
 
-    const currentPage = Math.max(1, +page);
-    const limitPerPage = Math.max(1, +limit);
+    const currentPage = Math.max(1, parseInt(String(page), 10) || 1);
+    const limitPerPage = Math.max(1, parseInt(String(limit), 10) || 10);
     const offset = (currentPage - 1) * limitPerPage;
 
     const countResult = await db
@@ -166,7 +244,7 @@ departmentsRouter.get("/:id/subjects", async (req, res) => {
       .from(subjects)
       .where(eq(subjects.departmentId, departmentId));
 
-    const totalCount = countResult[0]?.count ?? 0;
+    const totalCount = Number(countResult[0]?.count ?? 0);
 
     const subjectsList = await db
       .select({
@@ -178,7 +256,7 @@ departmentsRouter.get("/:id/subjects", async (req, res) => {
       .limit(limitPerPage)
       .offset(offset);
 
-    res.status(200).json({
+    return res.status(200).json({
       data: subjectsList,
       pagination: {
         page: currentPage,
@@ -189,22 +267,26 @@ departmentsRouter.get("/:id/subjects", async (req, res) => {
     });
   } catch (error) {
     console.error("GET /departments/:id/subjects error:", error);
-    res.status(500).json({ error: "Failed to fetch department subjects" });
+    return res
+      .status(500)
+      .json({ error: "Failed to fetch department subjects" });
   }
 });
 
-// List classes in a department with pagination
+// -----------------------------------------------------------------------------
+// GET /:id/classes - List classes in a department
+// -----------------------------------------------------------------------------
 departmentsRouter.get("/:id/classes", async (req, res) => {
   try {
-    const departmentId = Number(req.params.id);
-    const { page = 1, limit = 10 } = req.query;
+    const departmentId = parseInt(req.params.id, 10);
+    const { page = "1", limit = "10" } = req.query;
 
     if (!Number.isFinite(departmentId)) {
       return res.status(400).json({ error: "Invalid department id" });
     }
 
-    const currentPage = Math.max(1, +page);
-    const limitPerPage = Math.max(1, +limit);
+    const currentPage = Math.max(1, parseInt(String(page), 10) || 1);
+    const limitPerPage = Math.max(1, parseInt(String(limit), 10) || 10);
     const offset = (currentPage - 1) * limitPerPage;
 
     const countResult = await db
@@ -213,7 +295,7 @@ departmentsRouter.get("/:id/classes", async (req, res) => {
       .leftJoin(subjects, eq(classes.subjectId, subjects.id))
       .where(eq(subjects.departmentId, departmentId));
 
-    const totalCount = countResult[0]?.count ?? 0;
+    const totalCount = Number(countResult[0]?.count ?? 0);
 
     const classesList = await db
       .select({
@@ -233,7 +315,7 @@ departmentsRouter.get("/:id/classes", async (req, res) => {
       .limit(limitPerPage)
       .offset(offset);
 
-    res.status(200).json({
+    return res.status(200).json({
       data: classesList,
       pagination: {
         page: currentPage,
@@ -244,15 +326,19 @@ departmentsRouter.get("/:id/classes", async (req, res) => {
     });
   } catch (error) {
     console.error("GET /departments/:id/classes error:", error);
-    res.status(500).json({ error: "Failed to fetch department classes" });
+    return res
+      .status(500)
+      .json({ error: "Failed to fetch department classes" });
   }
 });
 
-// List users in a department by role with pagination
+// -----------------------------------------------------------------------------
+// GET /:id/users - List users in a department by role
+// -----------------------------------------------------------------------------
 departmentsRouter.get("/:id/users", async (req, res) => {
   try {
-    const departmentId = Number(req.params.id);
-    const { role, page = 1, limit = 10 } = req.query;
+    const departmentId = parseInt(req.params.id, 10);
+    const { role, page = "1", limit = "10" } = req.query;
 
     if (!Number.isFinite(departmentId)) {
       return res.status(400).json({ error: "Invalid department id" });
@@ -262,8 +348,8 @@ departmentsRouter.get("/:id/users", async (req, res) => {
       return res.status(400).json({ error: "Invalid role" });
     }
 
-    const currentPage = Math.max(1, +page);
-    const limitPerPage = Math.max(1, +limit);
+    const currentPage = Math.max(1, parseInt(String(page), 10) || 1);
+    const limitPerPage = Math.max(1, parseInt(String(limit), 10) || 10);
     const offset = (currentPage - 1) * limitPerPage;
 
     const baseSelect = {
@@ -310,7 +396,7 @@ departmentsRouter.get("/:id/users", async (req, res) => {
               and(eq(user.role, role), eq(subjects.departmentId, departmentId)),
             );
 
-    const totalCount = countResult[0]?.count ?? 0;
+    const totalCount = Number(countResult[0]?.count ?? 0);
 
     const usersList =
       role === "teacher"
@@ -340,7 +426,7 @@ departmentsRouter.get("/:id/users", async (req, res) => {
             .limit(limitPerPage)
             .offset(offset);
 
-    res.status(200).json({
+    return res.status(200).json({
       data: usersList,
       pagination: {
         page: currentPage,
@@ -351,7 +437,7 @@ departmentsRouter.get("/:id/users", async (req, res) => {
     });
   } catch (error) {
     console.error("GET /departments/:id/users error:", error);
-    res.status(500).json({ error: "Failed to fetch department users" });
+    return res.status(500).json({ error: "Failed to fetch department users" });
   }
 });
 

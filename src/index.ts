@@ -37,7 +37,7 @@ app.use(
         callback(new Error("Blocked by CORS policy"));
       }
     },
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     credentials: true,
   }),
 );

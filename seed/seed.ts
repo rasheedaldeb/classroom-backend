@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { hashPassword } from "better-auth/crypto";
 import { inArray } from "drizzle-orm";
 
 import { db } from "../src/db";
@@ -80,6 +81,7 @@ const ensureMapValue = <T>(map: Map<string, T>, key: string, label: string) => {
 const seed = async () => {
   const data = await loadSeedData();
 
+  // 1. Wipe existing tables to ensure clean state
   await db.delete(enrollments);
   await db.delete(classes);
   await db.delete(subjects);
@@ -88,7 +90,9 @@ const seed = async () => {
   await db.delete(account);
   await db.delete(user);
 
+  // 2. Insert Users and Accounts
   if (data.users.length) {
+    // Insert into 'user' table
     await db
       .insert(user)
       .values(
@@ -103,20 +107,28 @@ const seed = async () => {
       )
       .onConflictDoNothing({ target: user.id });
 
-    await db
-      .insert(account)
-      .values(
-        data.users.map((seedUser) => ({
+    // Hash passwords for all users asynchronously
+    const accountsToInsert = await Promise.all(
+      data.users.map(async (seedUser) => {
+        const hashedPassword = await hashPassword(seedUser.password);
+        return {
           id: `acc_${seedUser.id}`,
           userId: seedUser.id,
           accountId: seedUser.email,
-          providerId: "credentials",
-          password: seedUser.password,
-        })),
-      )
+          providerId: "credential", // Fixed: Changed from "credentials" to "credential"
+          password: hashedPassword,
+        };
+      }),
+    );
+
+    // Insert into 'account' table with hashed passwords
+    await db
+      .insert(account)
+      .values(accountsToInsert)
       .onConflictDoNothing({ target: [account.providerId, account.accountId] });
   }
 
+  // 3. Insert Departments
   if (data.departments.length) {
     await db
       .insert(departments)
@@ -142,6 +154,7 @@ const seed = async () => {
     departmentRows.map((row) => [row.code, row.id]),
   );
 
+  // 4. Insert Subjects
   if (data.subjects.length) {
     const subjectsToInsert = data.subjects.map((subject) => ({
       code: subject.code,
@@ -170,6 +183,7 @@ const seed = async () => {
           .where(inArray(subjects.code, subjectCodes));
   const subjectMap = new Map(subjectRows.map((row) => [row.code, row.id]));
 
+  // 5. Insert Classes
   if (data.classes.length) {
     const classesToInsert = data.classes.map((classItem) => ({
       name: classItem.name,
@@ -201,11 +215,24 @@ const seed = async () => {
           .from(classes)
           .where(inArray(classes.inviteCode, classInviteCodes));
   const classMap = new Map(classRows.map((row) => [row.inviteCode, row.id]));
+
+  // 6. Insert Enrollments
+  if (data.enrollments.length) {
+    const enrollmentsToInsert = data.enrollments.map((enrollment) => ({
+      classId: ensureMapValue(classMap, enrollment.classInviteCode, "class"),
+      studentId: enrollment.studentId,
+    }));
+
+    await db
+      .insert(enrollments)
+      .values(enrollmentsToInsert)
+      .onConflictDoNothing();
+  }
 };
 
 seed()
   .then(() => {
-    console.log("Seed completed.");
+    console.log("Seed completed successfully.");
     process.exit(0);
   })
   .catch((error) => {
